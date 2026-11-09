@@ -20,8 +20,10 @@ QA_PROMPT = PromptTemplate(
     "עני רק על סמך הקטעים מהתקנון שמופיעים למטה. אל תשתמשי בידע כללי.\n"
     "אם יש בקטעים מידע שקשור לשאלה, גם אם הוא מנוסח אחרת או עונה רק על חלק ממנה - עני על סמכו.\n"
     "אם השאלה לא ברורה, עני לפי הפירוש הסביר ביותר שיש לו תשובה בקטעים.\n"
+    "אם שואלים באופן כללי מה יש במאגר או במה את יכולה לעזור, תארי את הנושאים מהרשימה למטה.\n"
     f"רק אם אין בקטעים שום מידע שקשור לשאלה, עני בדיוק: \"{NO_ANSWER}\"\n"
     "עני בעברית, בקצרה, וציני את מספר הסעיף שעליו התשובה מבוססת.\n"
+    "הנושאים שיש במאגר: {topics}\n"
     "---------------------\n"
     "{context_str}\n"
     "---------------------\n"
@@ -32,7 +34,7 @@ QA_PROMPT = PromptTemplate(
 EXPAND_PROMPT = PromptTemplate(
     "שכתבי את שאלת הסטודנטית לשאילתת חיפוש מלאה וברורה בתקנון של מכללה.\n"
     "השתמשי במונחים הרשמיים שמקובלים בתקנונים, אבל הישארי בדיוק באותו נושא:\n"
-    "אל תוסיפי נושאים שהסטודנטית לא שאלה עליהם, ואל תוסיפי עובדות.\n"
+    "אל תוסיפי נושאים שהסטודנטית לא שאלה עליהם, ואל תוסיפי עובדות. שאלה כללית נשארת כללית.\n"
     "שמרי תאריכים ומספרים בדיוק כפי שהם, ואל תוסיפי מספרי סעיפים שלא הופיעו בשאלה.\n"
     "החזירי רק את השאילתה, בשורה אחת.\n"
     "שאלה: {question}\n"
@@ -61,7 +63,7 @@ class Answer:
 class CollegeRAG:
     def __init__(self):
         config.init_models()
-        # ל-Gemini אין tokenizer מקומי, אז סופרים בקירוב עם ה-tokenizer של tiktoken
+        # ספירה בקירוב עם ה-tokenizer של tiktoken
         self.token_counter = TokenCountingHandler(
             tokenizer=tiktoken.get_encoding("cl100k_base").encode
         )
@@ -74,7 +76,15 @@ class CollegeRAG:
         if collection.count() == 0:
             raise RuntimeError("ה-Vector DB ריק. הריצי קודם: python ingest.py")
         self.index = VectorStoreIndex.from_vector_store(ChromaVectorStore(chroma_collection=collection))
-        self.synthesizer = get_response_synthesizer(response_mode="compact", text_qa_template=QA_PROMPT)
+
+        # שאלה כמו "מה יש לך על המכללה?" היא על המאגר כולו ולא על סעיף מסוים, ו-Top K קטעים
+        # לא יכולים לענות עליה. לכן המודל מקבל גם את רשימת נושאי המסמכים
+        metadatas = collection.get(include=["metadatas"])["metadatas"]
+        self.topics = sorted({m["topic"] for m in metadatas if m.get("topic")})
+        self.synthesizer = get_response_synthesizer(
+            response_mode="compact",
+            text_qa_template=QA_PROMPT.partial_format(topics=", ".join(self.topics)),
+        )
 
     def expand_query(self, question: str) -> str:
         return str(Settings.llm.predict(EXPAND_PROMPT, question=question)).strip()

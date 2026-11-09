@@ -56,6 +56,10 @@ except RuntimeError as e:
     st.error(str(e))
     st.stop()
 
+with st.sidebar:
+    st.header("על מה אפשר לשאול")
+    st.markdown("\n".join(f"- {topic}" for topic in bot.topics))
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
